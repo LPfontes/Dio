@@ -27,7 +27,22 @@ class ProductApp:
             "product_image": None,
             "editing_product": False,
             "product_page": 1,
-            "page_size": 10
+            "page_size": 10,
+            "products_size": 0
+        }
+        for key, value in defaults.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
+    def clear_session_state(self):
+        defaults = {
+            "product_name": "",
+            "product_price": 0.0,
+            "product_description": "",
+            "product_image": None,
+            "editing_product": False,
+            "product_page": 1,
+            "page_size": 10,
+            "products_size": 0
         }
         for key, value in defaults.items():
             st.session_state[key] = value
@@ -57,7 +72,7 @@ class ProductApp:
                 if st.session_state.editing_product:
                     # Chama a função de edição
                     self.handle_product_edit()
-                    self.set_default_session_state()
+                    self.clear_session_state()
                     st.rerun()
                 else:
                     # Valida os campos obrigatórios antes de cadastrar
@@ -65,7 +80,7 @@ class ProductApp:
                         st.error("Por favor, preencha os campos obrigatórios: nome, descrição e preço válido.")
                     else:
                         self.handle_product_submission()
-                        self.set_default_session_state()
+                        self.clear_session_state()
                         st.rerun()
 
     def handle_product_submission(self):
@@ -145,30 +160,35 @@ class ProductApp:
     def setup_product_list(self):
         # Configura a lista de produtos com paginação
         st.header("Produtos Cadastrados")
-        st.session_state.page_size = st.selectbox("Itens por página", [10, 20, 50, 100], index=1)
-
+        st.session_state.page_size = st.selectbox("Itens por página", [10, 20, 50, 100], index=0)
+        
+        # Configura os botões de paginação
+        col1, col2, col3 = st.columns([1, 1, 6])
         self.products = self.db.list_products_from_db(
             page=st.session_state.product_page,
             page_size=st.session_state.page_size
         )
-
+        st.session_state.products_size = len(self.products)  # Atualiza o número de produtos na sessão
+        
+        with col1:
+            # Botão para página anterior
+            if st.session_state.product_page > 1:
+                if st.button("⬅", key="prev_page"):
+                    st.session_state.product_page -= 1
+                    st.rerun()
         if not self.products:
             st.warning("Nenhum produto cadastrado nesta página.")
             return False
+        with col2:
+            # Botão para próxima página
+            if st.button("➡", key="next_page") :
+                st.session_state.product_page += 1
+                st.rerun()
 
-        # Configura os botões de paginação
-        need_pagination = len(self.products) > st.session_state.page_size
-        if need_pagination:
-            col1, col2, col3 = st.columns([1, 1, 6])
-            with col1:
-                if st.button("⬅", key="prev_page") and st.session_state.product_page > 1:
-                    st.session_state.product_page -= 1
-            with col2:
-                if st.button("➡", key="next_page"):
-                    st.session_state.product_page += 1
-            with col3:
-                st.markdown(f"**Página {st.session_state.product_page}**")
-
+        with col3:
+            # Exibe o número da página atual
+            st.markdown(f"**Página {st.session_state.product_page}**")
+        
         return True
 
     @st.dialog("confirmar exclusão")
@@ -202,9 +222,9 @@ class ProductApp:
         # Exibe a lista de produtos com opções de editar e deletar
         for product in self.products:
             with st.container():
-                cols = st.columns([1, 3, 3, 2, 2, 2])
+                cols = st.columns([3, 1, 2, 1, 2, 2])
                 with cols[0]:
-                    st.image(product[4], width=100)
+                    st.image(product[4], width=300)
                 with cols[1]:
                     st.markdown(f"**Nome:** {product[1]}")
                 with cols[2]:
