@@ -1,89 +1,201 @@
+from os import path, getenv, remove
+from time import sleep
 import streamlit as st
 import ControlDB
-import pandas as pd  
 import ImageProcessor as image
+from dotenv import load_dotenv
+from PIL import Image
+import requests
+from io import BytesIO
+
+load_dotenv()
+
 class ProductApp:
     def __init__(self):
         st.title("Cadastro de Produto")
-        self.product_name = ""
-        self.product_price = 0.0
-        self.product_description = ""
-        self.product_image = None
         self.db = ControlDB.ControlDB()
-    def render_product_form(self):
-        self.product_name = st.text_input('Nome do Produto')
-        self.product_price = st.number_input('Preço do Produto', min_value=0.0, format="%.2f")
-        self.product_description = st.text_area('Descrição do Produto')
-        self.product_image = st.file_uploader('Imagem do Produto', type=['jpg', 'png', 'jpeg'])
+        self.set_default_session_state()
+        self.products = []
 
-        if st.button('Cadastrar Produto'):
-            self.handle_product_submission()
+    def set_default_session_state(self):
+        defaults = {
+            "product_name": "",
+            "product_price": 0.0,
+            "product_description": "",
+            "product_image": None,
+            "editing_product": False,
+            "product_page": 1,
+            "page_size": 10
+        }
+        for key, value in defaults.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
+
+    def setup_form(self):
+        if st.button("Cadastrar Produto"):
+            self.set_default_session_state()
+            self.render_product_form()
+
+    @st.dialog("Cadastrar/Editar Produto")
+    def render_product_form(self):
+        form_title = "Editar Produto" if st.session_state.editing_product else "Cadastrar Produto"
+        st.subheader(form_title)
+
+        with st.form(key="product_form"):
+            st.session_state.product_name = st.text_input("Nome do Produto", value=st.session_state.product_name)
+            st.session_state.product_price = st.number_input("Preço do Produto", min_value=0.0, format="%.2f", value=st.session_state.product_price)
+            st.session_state.product_description = st.text_area("Descrição do Produto", value=st.session_state.product_description)
+            st.session_state.product_image = st.file_uploader("Imagem do Produto", type=['jpg', 'jpeg', 'png'])
+
+            submitted = st.form_submit_button(form_title)
+
+            if submitted:
+                if st.session_state.editing_product:
+                    self.handle_product_edit()
+                    self.set_default_session_state()
+                    st.rerun()
+                else:
+                    if not st.session_state.product_name or not st.session_state.product_description or st.session_state.product_price <= 0:
+                        st.error("Por favor, preencha os campos obrigatórios: nome, descrição e preço válido.")
+                    else:
+                        self.handle_product_submission()
+                        self.set_default_session_state()
+                        st.rerun()
 
     def handle_product_submission(self):
-        if not self.product_name or not self.product_price or not self.product_description or not self.product_image:
-            st.error("Por favor, preencha todos os campos.")
+        name = st.session_state.product_name
+        price = st.session_state.product_price
+        description = st.session_state.product_description
+        image_file = st.session_state.product_image
+
+        image_path = self.process_image(image_file)
+
+        if self.db.save_product_to_db(name, price, description, image_path):
+            st.success("Produto cadastrado com sucesso!")
+            try:
+                if image_path and path.exists(image_path):
+                    remove(image_path)
+            except Exception as e:
+                st.warning(f"Imagem temporária não pôde ser removida: {e}")
         else:
-            image_path = f"temp/{self.product_image.name}.webp"
-            self.product_image = image.ImageProcessor(self.product_image)
-            self.product_image.resize(600, 600)  # Redimensiona a imagem
-            self.product_image.resize(150, 150)  # Redimensiona a imagem
-            self.product_image.save(image_path)  # Salva a imagem em formato WEBP
-            self.product_image = image_path
-            # Salva o produto no banco de dados
-            if self.db.save_product_to_db(self.product_name, self.product_price, self.product_description, image_path):
-                st.success("Produto cadastrado com sucesso!")
-                self.render_product_list()
+            st.error("Erro ao cadastrar o produto.")
+
+    def handle_product_edit(self):
+        product_id = st.session_state.product_id
+        name = st.session_state.product_name
+        price = st.session_state.product_price
+        description = st.session_state.product_description
+        image_file = st.session_state.product_image
+
+        image_path = self.process_image(image_file) if image_file else None
+
+        if self.db.update_product_in_db(product_id, name, price, description, image_path):
+            st.success("Produto atualizado com sucesso!")
+            sleep(1)
+        else:
+            st.error("Erro ao atualizar o produto.")
+
+    def process_image(self, uploaded_image):
+        try:
+            if uploaded_image:
+                image_name = path.splitext(uploaded_image.name)[0]
+                image_path = f"temp/{image_name}.webp"
+                img_processor = image.ImageProcessor(uploaded_image)
+                img_processor.resize(300, 300)
+                img_processor.save(image_path)
+                return image_path
             else:
-                st.error("Erro ao cadastrar o produto.")
+                placeholder_url = getenv("PLACEHOLDER_URL", "")
+                if placeholder_url.startswith("http"):
+                    response = requests.get(placeholder_url)
+                    if response.status_code == 200:
+                        img = Image.open(BytesIO(response.content))
+                        img = img.resize((300, 300))
+                        image_path = "temp/placeholder.webp"
+                        img.save(image_path)
+                        return image_path
+                    else:
+                        st.error("Erro ao carregar a imagem do link.")
+                        return None
+                else:
+                    st.error("URL do placeholder inválida.")
+                    return None
+        except Exception as e:
+            st.error(f"Erro ao processar imagem: {e}")
+            return None
 
     def render_product_list(self):
+        if self.setup_product_list():
+            self.display_products()
+
+    def setup_product_list(self):
         st.header("Produtos Cadastrados")
-        view_mode = st.selectbox("Escolha a forma de visualização:", ["Lista", "Grade"])
-        products = self.db.list_products_from_db()
-        if not products:
-            st.warning("Nenhum produto cadastrado.")
-            return
+        st.session_state.page_size = st.selectbox("Itens por página", [10, 20, 50, 100], index=1)
 
-        if view_mode == "Lista":
-            # Cria uma lista de dicionários com os dados dos produtos
-            # Antes de mostrar a tabela:
-            custom_css = """
-            <style>
-            table {
-                width: 100% !important;
-                table-layout: fixed;
-            }
-            th, td {
-                word-wrap: break-word;
-                text-align: left;
-                vertical-align: top;
-            }
-            img {
-                max-width: 100%;
-                height: auto;
-            }
-            </style>
-            """
-            st.markdown(custom_css, unsafe_allow_html=True)
-            product_data = [
-                {
-                    "Imagem": f'<img src="{product[4]}" width="50">',  # Reduz o tamanho da imagem
-                    "Nome": product[1],
-                    "Descrição": product[2],
-                    "Preço (R$)": f"{product[3]:.2f}"
-                }
-                for product in products
-            ]
-            # Converte a lista de dicionários em um DataFrame do pandas
-            product_df = pd.DataFrame(product_data)
-            # Exibe a tabela no Streamlit com imagens renderizadas como HTML
-            st.write(product_df.to_html(escape=False), unsafe_allow_html=True)
-        elif view_mode == "Grade":
-            cols = st.columns(3)  # Exibe os produtos em 3 colunas
-            for index, product in enumerate(products):
-                with cols[index % 3]:
-                    st.image(product[4], width=50)
-                    st.write(f"**Nome:** {product[1]}")
-                    st.write(f"**Preço:** R$ {product[3]:.2f}")
+        self.products = self.db.list_products_from_db(
+            page=st.session_state.product_page,
+            page_size=st.session_state.page_size
+        )
+
+        if not self.products:
+            st.warning("Nenhum produto cadastrado nesta página.")
+            return False
 
 
+        need_pagination = len(self.products) > st.session_state.page_size
+        if need_pagination:
+            col1, col2, col3 = st.columns([1, 1, 6])
+            with col1:
+                if st.button("⬅", key="prev_page") and st.session_state.product_page > 1:
+                    st.session_state.product_page -= 1
+            with col2:
+                if st.button("➡", key="next_page"):
+                    st.session_state.product_page += 1
+            with col3:
+                st.markdown(f"**Página {st.session_state.product_page}**")
+
+        return True
+    @st.dialog("confirmar exclusão")
+    def delete_product(self, product):
+        st.subheader("Deletar Produto")
+        st.markdown(f"Você tem certeza que deseja deletar o produto: **{product[1]}**?")
+
+        if st.button("Sim"):
+            if self.db.delete_product_from_db(product[0]):
+                st.success("Produto deletado com sucesso!")
+                st.rerun()
+            else:
+                st.error("Erro ao deletar o produto.")
+        elif st.button("Não"):
+            st.rerun()
+
+    def prepare_edit(self, product):
+        st.session_state.update({
+            "product_id": product[0],
+            "editing_product": True,
+            "product_name": product[1],
+            "product_description": product[2],
+            "product_price": float(product[3]),
+            "product_image": None
+        })
+        self.render_product_form()
+    def display_products(self):
+        for product in self.products:
+            with st.container():
+                cols = st.columns([1, 3, 3, 2, 2, 2])
+                with cols[0]:
+                    st.image(product[4], width=100)
+                with cols[1]:
+                    st.markdown(f"**Nome:** {product[1]}")
+                with cols[2]:
+                    st.markdown(f"**Descrição:** {product[2]}")
+                with cols[3]:
+                    st.markdown(f"**Preço:** R$ {product[3]:.2f}")
+                with cols[4]:
+                    if st.button("Deletar", key=f"delete_{product[0]}"):
+                        st.session_state.product_id = product[0]
+                        self.delete_product(product)      
+                with cols[5]:
+                    if st.button("Editar", key=f"edit_{product[0]}"):
+                        self.prepare_edit(product)        
+            st.markdown("---")
