@@ -1,14 +1,18 @@
 ### Resumo da Aplicação
 
 Esta aplicação é um **sistema de cadastro e gerenciamento de produtos** desenvolvido com **Streamlit** e integrado ao **Azure Blob Storage** e **SQL Server**. Ela permite que os usuários realizem as seguintes operações:
+![Captura de tela 2025-05-11 030300](https://github.com/user-attachments/assets/5b5e160a-4e07-4a4f-88ab-a30f6dbb50e2)
+
 
 1. **Cadastrar Produtos**:
    - Os usuários podem preencher um formulário com o nome, preço, descrição e imagem do produto.
    - A imagem é processada e enviada para o Azure Blob Storage, e a URL gerada é salva no banco de dados.
+![2](https://github.com/user-attachments/assets/f626fe84-0a7e-423a-a2a4-bb2374b3b756)
 
 2. **Editar Produtos**:
    - Os produtos cadastrados podem ser editados diretamente na interface.
    - É possível alterar o nome, preço, descrição e imagem do produto.
+![edit](https://github.com/user-attachments/assets/9aec9039-9561-4baa-a8c0-a9eb7ac07906)
 
 3. **Listar Produtos**:
    - Os produtos cadastrados são exibidos em uma lista paginada.
